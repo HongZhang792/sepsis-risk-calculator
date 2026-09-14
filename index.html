@@ -1,0 +1,327 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sepsis Risk Prediction Calculator</title>
+<style>
+  :root{
+    --main:#1a6fb5; --main-dark:#14558c; --bg:#eef3f8; --card:#ffffff;
+    --line:#dfe7ef; --txt:#22303c; --muted:#7b8a99;
+    --high:#d64541; --highbg:#fdecea; --low:#2e8b57; --lowbg:#eaf6f0;
+    --warn:#b58105;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Arial,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--txt)}
+  .wrap{max-width:640px;margin:0 auto;padding:18px 14px 40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(20,40,60,.06)}
+  h1{font-size:22px;margin:2px 0 4px;color:var(--main-dark)}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 6px}
+  .field{margin:12px 0}
+  .fhead{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap}
+  .flabel{font-weight:600;font-size:15px}
+  .funit{color:var(--muted);font-size:13px}
+  .fhint{color:var(--muted);font-size:12px;margin-top:2px}
+  input[type=number]{width:100%;font-size:16px;padding:9px 10px;margin-top:5px;border:1px solid var(--line);border-radius:8px;background:#fafcfe}
+  input:focus{outline:2px solid var(--main);border-color:var(--main)}
+  .rowbtn{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  button{cursor:pointer;border:none;border-radius:8px;padding:11px 18px;font-size:16px;font-weight:600}
+  #btnCalc{background:var(--main);color:#fff;flex:1;min-width:140px}
+  #btnCalc:hover{background:var(--main-dark)}
+  #btnClear{background:#eef2f6;color:var(--txt)}
+  #btnDemo{background:#fff;color:var(--main);border:1px solid var(--main);font-size:13px;font-weight:500;padding:8px 12px}
+  #res{display:none}
+  .resrow{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .prob{font-size:40px;font-weight:700;color:var(--main-dark);line-height:1}
+  .prob small{font-size:16px;color:var(--muted);font-weight:400}
+  .badge{display:inline-block;padding:6px 14px;border-radius:999px;font-weight:700;font-size:16px}
+  .badge.high{background:var(--highbg);color:var(--high)}
+  .badge.low{background:var(--lowbg);color:var(--low)}
+  .barwrap{position:relative;height:16px;background:#e7edf3;border-radius:8px;margin:14px 0 6px}
+  .barfill{height:100%;border-radius:8px;background:linear-gradient(90deg,#2e8b57,#c9a227 51%,#d64541);width:100%}
+  .barline{position:absolute;top:-4px;bottom:-4px;width:2px;background:#222}
+  .barticks{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
+  .interpret{margin-top:10px;font-size:14px;line-height:1.6}
+  .err{color:var(--high);font-size:13px;margin-top:8px;display:none}
+  .foot{font-size:12px;color:var(--muted);line-height:1.7}
+  .foot b{color:#5a6a78}
+  .disc{font-size:12px;color:var(--warn);margin-top:8px;line-height:1.6}
+  #selftest{display:none;margin-top:12px;font-size:12px;font-family:Consolas,monospace;background:#f4f7fa;border:1px dashed var(--line);padding:10px;white-space:pre-wrap;word-break:break-all}
+  .ok{color:var(--low)} .bad{color:var(--high)}
+  @media (max-width:420px){ .prob{font-size:32px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1 id="title">Sepsis Risk Prediction Calculator</h1>
+    <p class="sub">Risk of sepsis based on a gradient boosting machine (GBM) model &middot; enter 5 clinical measures to obtain the predicted probability and risk group</p>
+
+    <div id="fields"></div>
+
+    <div class="rowbtn">
+      <button id="btnCalc">Calculate risk</button>
+      <button id="btnClear">Clear</button>
+      <button id="btnDemo">Fill example values</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card" id="res">
+    <div class="resrow">
+      <div class="prob"><span id="probNum">--</span><small> %</small></div>
+      <div><span class="badge" id="badge"></span></div>
+    </div>
+    <div class="barwrap">
+      <div class="barfill"></div>
+      <div class="barline" id="barMark"></div>
+    </div>
+    <div class="barticks"><span>0</span><span>50</span><span>100 %</span></div>
+    <div class="barticks" style="justify-content:center"><span style="color:var(--warn)">Risk-grouping threshold 0.503 (50.3%)</span></div>
+    <div class="interpret" id="interpret"></div>
+  </div>
+
+  <div class="card">
+    <div class="disc">
+      Disclaimer: This tool is generated from a statistical model built on retrospective data and is intended for research/reference purposes only. It does not replace clinical diagnosis or physician judgment. Input units must match the modelling scale.
+    </div>
+  </div>
+
+  <div id="selftest"></div>
+</div>
+
+<script>
+// ===== CONFIG: edit labels / units / ranges / hints here =====
+var FIELDS = [
+  { key:'Age',   label:'Age',               unit:'years', min:0, max:120, step:1 },
+  { key:'PCT',   label:'PCT (procalcitonin)', unit:'ng/mL', min:0, max:200, step:0.01 },
+  { key:'CRP',   label:'CRP (C-reactive protein)', unit:'mg/L', min:0, max:500, step:0.1 },
+  { key:'lymph', label:'Lymphocyte',        unit:'%',    min:0, max:100, step:0.1 },
+  { key:'APTT',  label:'APTT (activated partial thromboplastin time)', unit:'s', min:0, max:200, step:0.1 }
+];
+var CUT = 0.503;   // grouping threshold (Youden-optimal on the training set)
+
+// ===== Model (exported from GBM_fit_grid.rds by export_model.R; do not edit) =====
+var MODEL = {
+  "vars": ["Age","PCT","CRP","lymph","APTT"],
+  "initF": -0.31365755885504165,
+  "cut": 0.503,
+  "nTrees": 100,
+  "trees": [
+    {"v":1,"t":0.16300000000000001,"l":0.10412155164297154,"r":-0.037995418708715013,"m":0.00092833750225646678},
+    {"v":2,"t":29.23,"l":0.095540890994371935,"r":-0.046142914419171031,"m":-0.0073377957390286883},
+    {"v":1,"t":0.4365,"l":0.075755552629831427,"r":-0.048995437273753412,"m":-0.0044982689005002175},
+    {"v":1,"t":0.99449999999999994,"l":0.063201410144160766,"r":-0.053907549820954741,"m":-0.0031851977341531192},
+    {"v":1,"t":1.0105,"l":0.06940010708158556,"r":-0.055066040611333356,"m":0.003599532186602947},
+    {"v":1,"t":1.0145,"l":0.061127411267395931,"r":-0.050639759309593968,"m":-0.0036548340988848379},
+    {"v":1,"t":1.0105,"l":0.055607917564766518,"r":-0.054052546510164036,"m":-0.0030639230867886818},
+    {"v":1,"t":0.34899999999999998,"l":0.068979184965160742,"r":-0.051540180425948504,"m":-0.0039465456855104584},
+    {"v":2,"t":29.814999999999998,"l":0.068595118692834398,"r":-0.036272302457718307,"m":-0.010890378867138669},
+    {"v":1,"t":0.13100000000000001,"l":0.071695280304118036,"r":-0.031118583379926984,"m":-0.0068885645499291133},
+    {"v":3,"t":10.85,"l":-0.043981555460542582,"r":0.053543320807934724,"m":0.00012205100481976918},
+    {"v":1,"t":3.1189999999999998,"l":0.048721638590860705,"r":-0.048499683536048797,"m":0.0066130404721992638},
+    {"v":1,"t":0.15150000000000002,"l":0.069115648006621525,"r":-0.02235984642767706,"m":0.0032765978723811443},
+    {"v":1,"t":0.16300000000000001,"l":0.070946241827273146,"r":-0.031184077774232589,"m":-0.0038625910018552576},
+    {"v":1,"t":1.0145,"l":0.049567409024797643,"r":-0.048320512341074581,"m":-0.0021822564106634685},
+    {"v":1,"t":16.298000000000002,"l":0.032079916792813794,"r":-0.069293765426247281,"m":0.0068979192989069007},
+    {"v":2,"t":14.865,"l":0.059718906777803928,"r":-0.024971944454517669,"m":-0.0050129540367093942},
+    {"v":1,"t":0.46850000000000003,"l":0.039160933666481067,"r":-0.042486051478594133,"m":-0.009203204030920167},
+    {"v":4,"t":37.75,"l":0.041330823532973501,"r":-0.047196750186608169,"m":0.0086263695473955578},
+    {"v":1,"t":1.0145,"l":0.038896842612964,"r":-0.047227704131312366,"m":-0.0077310967071856258},
+    {"v":2,"t":56.219999999999999,"l":0.046606370563476815,"r":-0.035520751886898488,"m":-0.0030883850593617485},
+    {"v":1,"t":3.1260000000000003,"l":0.037401499321747307,"r":-0.0424071115939883,"m":0.003851382631055908},
+    {"v":1,"t":0.52249999999999996,"l":0.04971318241962118,"r":-0.032192544090864479,"m":0.00015239249289418917},
+    {"v":4,"t":37.700000000000003,"l":0.032327271084140768,"r":-0.046255531233944894,"m":-0.0022091197435529283},
+    {"v":1,"t":0.3735,"l":0.033154629598763148,"r":-0.030714977877781841,"m":-0.005899397902818502},
+    {"v":2,"t":29.814999999999998,"l":0.05168427423298716,"r":-0.017759716606338904,"m":0.002144611978181304},
+    {"v":2,"t":58.340000000000003,"l":0.049816960619292514,"r":-0.029785459935926656,"m":0.0016498908565802757},
+    {"v":2,"t":16.210000000000001,"l":0.061976390346173971,"r":-0.021529358455681505,"m":-0.00078589219280020555},
+    {"v":2,"t":6.4450000000000003,"l":0.074887938192367318,"r":-0.011737491295405361,"m":0.0037116298871273466},
+    {"v":1,"t":19.749499999999998,"l":0.020308327220207714,"r":-0.063082258902523419,"m":-0.00093768198303588479},
+    {"v":1,"t":26.383499999999998,"l":0.013515481124716084,"r":-0.062038400393507921,"m":-0.0052526805263077153},
+    {"v":4,"t":37.700000000000003,"l":0.034028988714060258,"r":-0.042785344630681406,"m":0.00026982310395086363},
+    {"v":4,"t":37.650000000000006,"l":0.017967108852972809,"r":-0.039989820113929465,"m":-0.0056586456303504102},
+    {"v":1,"t":0.13100000000000001,"l":0.059154881817791584,"r":-0.023526419387929612,"m":-0.00035458975065743057},
+    {"v":4,"t":36.75,"l":0.026008858161835596,"r":-0.041696978691961678,"m":-0.0059034471068331812},
+    {"v":1,"t":3.1260000000000003,"l":0.027724529229005191,"r":-0.048049086029236091,"m":-0.0055772507252537136},
+    {"v":0,"t":50.5,"l":0.077158011428457948,"r":-0.010543725372207224,"m":0.0034215193412744913},
+    {"v":3,"t":23.449999999999999,"l":-0.01884880179762749,"r":0.057366254325585835,"m":-0.0076835387986854105},
+    {"v":1,"t":2.4430000000000001,"l":0.038266879169740517,"r":-0.045706582380517446,"m":-0.0039872830115994786},
+    {"v":4,"t":36.75,"l":0.02710275379101475,"r":-0.052797155382635741,"m":-0.0054679098211739855},
+    {"v":1,"t":1.2275,"l":0.036020307596686243,"r":-0.022436478130069156,"m":0.0058610741962582986},
+    {"v":1,"t":1.2235,"l":0.022068018524390994,"r":-0.038406786239269831,"m":-0.0095175482948458706},
+    {"v":4,"t":34.450000000000003,"l":0.03279760961233294,"r":-0.02634697712327666,"m":-0.0026137990064396864},
+    {"v":3,"t":16.050000000000001,"l":-0.019955327197621775,"r":0.049357440922342087,"m":0.0012358375779085787},
+    {"v":1,"t":3.1189999999999998,"l":0.02533161683363018,"r":-0.035410224375230989,"m":-0.0013638420416017981},
+    {"v":2,"t":133.14500000000001,"l":0.014426809598593895,"r":-0.040266416561130544,"m":-0.0071717892670297677},
+    {"v":0,"t":65.5,"l":0.027558767867469094,"r":-0.03241396232675111,"m":-0.0030005850977386527},
+    {"v":0,"t":64,"l":0.034336323061088352,"r":-0.023085595820704095,"m":0.0028822783232912157},
+    {"v":4,"t":36.600000000000001,"l":0.030541294078512173,"r":-0.033096883351640662,"m":-0.0014804639914373435},
+    {"v":2,"t":74.115000000000009,"l":0.02903494579485413,"r":-0.021575871614437272,"m":0.0016341847770849002},
+    {"v":4,"t":33.899999999999999,"l":0.03766369413447973,"r":-0.028272207129577967,"m":-0.00097390405847127431},
+    {"v":0,"t":64,"l":0.023573618894210675,"r":-0.033981253945502651,"m":-0.006853479486019937},
+    {"v":1,"t":3.1260000000000003,"l":0.025006356723085543,"r":-0.046403755060016816,"m":-0.0041034977617459894},
+    {"v":3,"t":23.100000000000001,"l":-0.010389143605574327,"r":0.053810392723840778,"m":0.0018782837185177305},
+    {"v":2,"t":77.325000000000003,"l":0.019487480105675425,"r":-0.033846663003046569,"m":-0.0080288612434104446},
+    {"v":0,"t":61.5,"l":0.021478455995997275,"r":-0.032005404867092462,"m":-0.012587697419983449},
+    {"v":0,"t":65.5,"l":0.031018340742540357,"r":-0.022897402307008794,"m":0.0042321754058216718},
+    {"v":1,"t":0.1615,"l":0.046963273489056948,"r":-0.011856293307848573,"m":0.0042535243499026197},
+    {"v":1,"t":2.5489999999999999,"l":0.02436444341153764,"r":-0.04116827979717963,"m":-0.0027669388086319305},
+    {"v":0,"t":50.5,"l":0.038175487700824726,"r":-0.0184614898466402,"m":-0.0083606276088757561},
+    {"v":2,"t":15.655000000000001,"l":0.036157688502232443,"r":-0.023466221446858383,"m":-0.010174266999608834},
+    {"v":1,"t":0.1895,"l":0.034481044626095372,"r":-0.023860720816270165,"m":-0.0075101623483460672},
+    {"v":1,"t":3.1189999999999998,"l":0.0096100493819302833,"r":-0.044529928458417585,"m":-0.010390706762911607},
+    {"v":0,"t":61.5,"l":0.04194359789072797,"r":-0.01616871945904871,"m":0.0075203780593315938},
+    {"v":2,"t":67.044999999999987,"l":0.018040191717763686,"r":-0.034618441441915414,"m":-0.0097984487424488328},
+    {"v":1,"t":6.7195,"l":0.018928347555146739,"r":-0.041002460126340463,"m":-0.0005396218190943272},
+    {"v":2,"t":104.295,"l":0.01090124624087406,"r":-0.037116598016198869,"m":-0.010507983682661641},
+    {"v":2,"t":25.960000000000001,"l":0.05751396864760458,"r":-0.004692596370702639,"m":0.009175109206626994},
+    {"v":0,"t":64,"l":0.036297649850765092,"r":-0.024983899914461507,"m":0.001558427372388231},
+    {"v":1,"t":3.1260000000000003,"l":0.033629753963713351,"r":-0.02026556500373158,"m":0.010629840773784623},
+    {"v":0,"t":71.5,"l":0.018375152327013793,"r":-0.028924549124422973,"m":0.0024077371873567955},
+    {"v":0,"t":61.5,"l":0.024094486698198692,"r":-0.017441219359826666,"m":-0.00050946657184180652},
+    {"v":4,"t":40.700000000000003,"l":0.013600444520414486,"r":-0.037509162534991987,"m":-0.002025422604805328},
+    {"v":0,"t":65.5,"l":0.045693167798155666,"r":-0.0099544948032329918,"m":0.0176921146420429},
+    {"v":4,"t":41.900000000000006,"l":0.012353186218233456,"r":-0.051499743140824686,"m":-0.0018815432567158112},
+    {"v":3,"t":22.649999999999999,"l":-0.023349684373443039,"r":0.039706207485595807,"m":-0.011702417724321214},
+    {"v":2,"t":23.185000000000002,"l":0.047245192991125715,"r":-0.021979152937020394,"m":-0.0039014575035554856},
+    {"v":3,"t":29.25,"l":-0.0095870813707699051,"r":0.065813123732177126,"m":-0.0014227279519794624},
+    {"v":2,"t":77.615000000000009,"l":0.031836649131915647,"r":-0.014878078597574122,"m":0.0071403281029497187},
+    {"v":0,"t":82.5,"l":-0.0063384487985820208,"r":0.083815857123858584,"m":-2.1905071532043046e-05},
+    {"v":4,"t":36.549999999999997,"l":0.01644392840414521,"r":-0.036440321680894741,"m":-0.0081455636736122196},
+    {"v":1,"t":16.298000000000002,"l":0.019829692406000309,"r":-0.057691656224861533,"m":0.0035353961969656535},
+    {"v":2,"t":206.36000000000001,"l":-0.014484677091180143,"r":0.040817599929249604,"m":-0.0049740944188769384},
+    {"v":4,"t":46.450000000000003,"l":0.010554897246502451,"r":-0.061199517429791642,"m":0.0032423454323578307},
+    {"v":1,"t":27.421500000000002,"l":0.017131287291652711,"r":-0.05652366998804819,"m":0.0030570916331111378},
+    {"v":1,"t":1.3340000000000001,"l":0.014949603626438457,"r":-0.035109678233774276,"m":-0.0089640660520071136},
+    {"v":0,"t":62.5,"l":0.021318027154402591,"r":-0.028596181709544401,"m":-0.0063414389039629405},
+    {"v":4,"t":55.149999999999999,"l":-0.0062695887014982453,"r":0.11389913562548987,"m":0.0013844701728322069},
+    {"v":4,"t":37.75,"l":0.03244812239575199,"r":-0.036405687712991075,"m":0.0074502422925777538},
+    {"v":1,"t":26.5185,"l":0.012564692371021445,"r":-0.05646395385508373,"m":-0.00018582190004256952},
+    {"v":4,"t":27.25,"l":-0.095432748046055005,"r":0.0052408123258387874,"m":-0.001812749228879886},
+    {"v":1,"t":16.298000000000002,"l":0.028359305165290855,"r":-0.056068069281452582,"m":0.0079246540253147379},
+    {"v":4,"t":27.700000000000003,"l":-0.067533443682612798,"r":-0.003349224276463099,"m":-0.0086638411699659391},
+    {"v":0,"t":50.5,"l":0.061716947772102473,"r":-0.0099497647488705557,"m":-0.00082024723027526573},
+    {"v":0,"t":61.5,"l":0.026808278237289769,"r":-0.042613659534458975,"m":-0.01210338115069679},
+    {"v":0,"t":52.5,"l":-0.037079536885209222,"r":0.01174058859848745,"m":0.003344770840144712},
+    {"v":4,"t":37.650000000000006,"l":0.0077962607674912435,"r":-0.040334519966654901,"m":-0.012130495587410027},
+    {"v":4,"t":57.299999999999997,"l":-0.017627974980062012,"r":0.099878998947004749,"m":-0.010143454347764765},
+    {"v":3,"t":6.0499999999999998,"l":0.040443909406532329,"r":-0.0085781846998819883,"m":0.0045360060801778916},
+    {"v":0,"t":80.5,"l":-0.01084163121630919,"r":0.077344588026156055,"m":-0.0052246745766617222}
+  ]
+};
+var GOLDEN = [
+  {"x":[34,0.050000000000000003,1.96,31.100000000000001,27.5],"p":0.043719237393234578},
+  {"x":[69,0.050000000000000003,0.45000000000000001,25.800000000000001,31.600000000000001],"p":0.092071553728034439},
+  {"x":[31,0.183,56.18,18,33.700000000000003],"p":0.17818876222819702},
+  {"x":[73,0.050000000000000003,59.869999999999997,14.9,33.799999999999997],"p":0.26020276018290966},
+  {"x":[88,0.074999999999999997,35.950000000000003,9.6999999999999993,49.299999999999997],"p":0.42735074290246011},
+  {"x":[75,0.67000000000000004,34.43,12,35.799999999999997],"p":0.50737644639461421},
+  {"x":[67,1.298,4.1100000000000003,18.399999999999999,40.200000000000003],"p":0.64564820555970714},
+  {"x":[81,1.28,101.62,6.2000000000000002,35.100000000000001],"p":0.76311631950808823},
+  {"x":[65,12.186999999999999,115.81,12.1,36],"p":0.85121617040380571},
+  {"x":[76,1.8009999999999999,163.33000000000001,5.0999999999999996,45.700000000000003],"p":0.89657476164379324},
+  {"x":[55,39.762,150.16999999999999,5,59.299999999999997],"p":0.93057963835542012},
+  {"x":[81,5.8780000000000001,161.18000000000001,7.0999999999999996,52.399999999999999],"p":0.94452868086297515}
+];
+
+// ===== Scoring, identical to R closed form  P(Yes) = 1/(1+exp(f)), f = initF + sum(leaf) =====
+function predict(xArr) {   // xArr: numeric array of length 5 in MODEL.vars order
+  var f = MODEL.initF, n = MODEL.trees.length, s, i;
+  for (i = 0; i < n; i++) {
+    s = MODEL.trees[i];
+    f += (xArr[s.v] < s.t) ? s.l : s.r;
+  }
+  return 1 / (1 + Math.exp(f));
+}
+
+// ===== Render input fields =====
+var fieldWrap = document.getElementById('fields');
+FIELDS.forEach(function(fd){
+  var box = document.createElement('div'); box.className = 'field';
+  box.innerHTML =
+    '<div class="fhead"><span class="flabel">' + fd.label +
+    '</span><span class="funit">Unit: ' + fd.unit + '</span></div>' +
+    '<input type="number" id="in_' + fd.key + '" min="' + fd.min + '" max="' + fd.max +
+    '" step="' + fd.step + '" placeholder="Enter value" inputmode="decimal">';
+  fieldWrap.appendChild(box);
+});
+
+function readInputs(){
+  var x = [], fd, el, v;
+  for (var i = 0; i < FIELDS.length; i++){
+    fd = FIELDS[i]; el = document.getElementById('in_' + fd.key); v = parseFloat(el.value);
+    if (el.value === '' || isNaN(v)) { return {err:'Please fill in all 5 measures before calculating.'}; }
+    if (v < fd.min || v > fd.max) { return {err:'"'+fd.label+'" must be between ' + fd.min + ' and ' + fd.max + ' ' + fd.unit + '.'}; }
+    x.push(v);
+  }
+  return {x:x};
+}
+
+function fmtP(p){ return (p*100).toFixed(1); }
+
+function compute(){
+  var r = readInputs(); document.getElementById('err').style.display = 'none';
+  if (r.err){ document.getElementById('err').textContent = r.err; document.getElementById('err').style.display = 'block'; return; }
+  var p = predict(r.x), hi = p > CUT;
+  document.getElementById('res').style.display = 'block';
+  document.getElementById('probNum').textContent = fmtP(p);
+  var b = document.getElementById('badge');
+  b.textContent = hi ? 'High risk' : 'Low risk';
+  b.className = 'badge ' + (hi ? 'high' : 'low');
+  var mark = document.getElementById('barMark');
+  var pw = Math.max(0, Math.min(100, p*100));
+  mark.style.left = 'calc(' + pw + '% - 1px)';
+  var interp = document.getElementById('interpret');
+  var per = (p*100).toFixed(1);
+  interp.innerHTML = hi
+    ? 'Predicted probability <b>' + per + '%</b>, exceeding the grouping threshold (50.3%) → <b>HIGH-risk</b> group. This suggests an elevated probability of sepsis; interpret together with the clinical presentation and PCT, CRP and other measures.'
+    : 'Predicted probability <b>' + per + '%</b>, below the grouping threshold (50.3%) → <b>LOW-risk</b> group. Clinical judgement remains necessary; repeat relevant tests if indicated.';
+}
+
+document.getElementById('btnCalc').addEventListener('click', compute);
+document.getElementById('btnClear').addEventListener('click', function(){
+  FIELDS.forEach(function(fd){ document.getElementById('in_' + fd.key).value = ''; });
+  document.getElementById('res').style.display = 'none';
+  document.getElementById('err').style.display = 'none';
+});
+document.getElementById('btnDemo').addEventListener('click', function(){
+  var g = GOLDEN[Math.floor(GOLDEN.length/2)];
+  FIELDS.forEach(function(fd, i){ document.getElementById('in_' + fd.key).value = g.x[i]; });
+  compute();
+});
+FIELDS.forEach(function(fd){
+  document.getElementById('in_' + fd.key).addEventListener('keydown', function(e){ if (e.key === 'Enter') compute(); });
+});
+
+// ===== Self-test: double-click the title to compare against embedded golden samples =====
+function runSelfTest(){
+  var out = [], all = true, i, g, p, ok, tol = 1e-9;
+  out.push('Trees = ' + MODEL.trees.length + '; variables = ' + MODEL.vars.join(', '));
+  out.push('Golden samples = ' + GOLDEN.length + ', per-sample comparison (tolerance ' + tol + '):');
+  for (i = 0; i < GOLDEN.length; i++){
+    g = GOLDEN[i]; p = predict(g.x); ok = Math.abs(p - g.p) <= tol;
+    if (!ok) all = false;
+    out.push((ok ? '  [PASS] ' : '  [FAIL] ') + 'sample' + (i+1) + '  JS=' + p.toPrecision(10) + '  reference=' + g.p.toPrecision(10));
+  }
+  out.push(all ? '>>> Self-test PASSED (all samples)' : '>>> Self-test FAILED!');
+  var box = document.getElementById('selftest');
+  box.style.display = 'block';
+  box.textContent = out.join('\n');
+  document.title = all ? 'SELFTEST_ALL_PASS' : 'SELFTEST_FAIL';
+  try { console.log(out.join('\n')); } catch(e){}
+}
+var tcount = 0, tlast = 0;
+document.getElementById('title').addEventListener('click', function(){
+  var now = Date.now();
+  tcount = (now - tlast < 500) ? tcount + 1 : 1; tlast = now;
+  if (tcount >= 2){ runSelfTest(); tcount = 0; }
+});
+window.addEventListener('load', function(){
+  if (location.hash && location.hash.indexOf('autotest') >= 0) { setTimeout(runSelfTest, 400); }
+});
+</script>
+</body>
+</html>
+
